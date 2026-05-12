@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment variables — JANGAN PERNAH COMMIT FILE INI
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+.next/
+out/
+
+# Prisma
+backend/prisma/migrations/dev.db
+backend/prisma/*.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Docker volumes (data lokal, tidak perlu di-commit)
+postgres_data/
+redis_data/
+
+# Coverage
+coverage/

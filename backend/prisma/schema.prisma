@@ -1,0 +1,215 @@
+// This is your Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role_name   String   @unique @db.VarChar(50)
+  description String?
+  created_at  DateTime @default(now())
+
+  users           User[]
+  role_permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role_id       String?   @db.Uuid
+  full_name     String?   @db.VarChar(150)
+  email         String    @unique @db.VarChar(150)
+  password_hash String
+  status        String    @default("active") @db.VarChar(20)
+  last_login    DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+
+  role              Role?               @relation(fields: [role_id], references: [id])
+  pii_data          PiiData[]
+  tokenization_jobs TokenizationJob[]
+  audit_logs        AuditLog[]
+  system_settings   SystemSetting[]
+
+  @@map("users")
+}
+
+model Permission {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  permission_name String   @db.VarChar(100)
+  module_name     String   @db.VarChar(100)
+  created_at      DateTime @default(now())
+
+  role_permissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id            String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role_id       String @db.Uuid
+  permission_id String @db.Uuid
+
+  role       Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+
+  @@unique([role_id, permission_id])
+  @@map("role_permissions")
+}
+
+model PiiType {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String   @db.VarChar(100)
+  category         String?  @db.VarChar(100)
+  validation_regex String?
+  min_length       Int?
+  max_length       Int?
+  example_value    String?  @db.VarChar(255)
+  is_active        Boolean  @default(true)
+  created_at       DateTime @default(now())
+
+  pii_data              PiiData[]
+  tokenization_rules    TokenizationRule[]
+
+  @@map("pii_types")
+}
+
+model TokenizationMethod {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  method_name      String   @db.VarChar(100)
+  description      String?
+  supports_prefix  Boolean  @default(false)
+  supports_suffix  Boolean  @default(false)
+  supports_tweak   Boolean  @default(false)
+  is_deterministic Boolean  @default(false)
+  is_active        Boolean  @default(true)
+  created_at       DateTime @default(now())
+
+  tokenization_rules TokenizationRule[]
+
+  @@map("tokenization_methods")
+}
+
+model Tweak {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tweak_name  String   @db.VarChar(100)
+  tweak_type  String?  @db.VarChar(50)
+  tweak_value String?
+  tweak_length Int?
+  description String?
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+
+  tokenization_rules TokenizationRule[]
+
+  @@map("tweaks")
+}
+
+model TokenizationRule {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rule_name        String   @db.VarChar(150)
+  pii_type_id      String?  @db.Uuid
+  method_id        String?  @db.Uuid
+  tweak_id         String?  @db.Uuid
+  preserve_prefix  Int      @default(0)
+  preserve_suffix  Int      @default(0)
+  preserve_domain  Boolean  @default(false)
+  maintain_length  Boolean  @default(true)
+  maintain_charset Boolean  @default(true)
+  randomized       Boolean  @default(false)
+  configuration    Json?
+  is_active        Boolean  @default(true)
+  created_at       DateTime @default(now())
+
+  pii_type              PiiType?            @relation(fields: [pii_type_id], references: [id], onDelete: Cascade)
+  method                TokenizationMethod? @relation(fields: [method_id], references: [id])
+  tweak                 Tweak?              @relation(fields: [tweak_id], references: [id])
+  tokenization_results  TokenizationResult[]
+
+  @@map("tokenization_rules")
+}
+
+model PiiData {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pii_type_id    String?  @db.Uuid
+  original_value String
+  data_hash      String?
+  created_by     String?  @db.Uuid
+  created_at     DateTime @default(now())
+
+  pii_type             PiiType?            @relation(fields: [pii_type_id], references: [id])
+  creator              User?               @relation(fields: [created_by], references: [id])
+  tokenization_results TokenizationResult[]
+
+  @@map("pii_data")
+}
+
+model TokenizationJob {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  job_name      String    @db.VarChar(150)
+  total_data    Int       @default(0)
+  success_count Int       @default(0)
+  failed_count  Int       @default(0)
+  status        String    @default("pending") @db.VarChar(50)
+  created_by    String?   @db.Uuid
+  started_at    DateTime?
+  completed_at  DateTime?
+  created_at    DateTime  @default(now())
+
+  creator              User?               @relation(fields: [created_by], references: [id])
+  tokenization_results TokenizationResult[]
+
+  @@map("tokenization_jobs")
+}
+
+model TokenizationResult {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  job_id             String?  @db.Uuid
+  pii_data_id        String?  @db.Uuid
+  rule_id            String?  @db.Uuid
+  tokenized_value    String?
+  processing_time_ms Int?
+  status             String?  @db.VarChar(50)
+  error_message      String?
+  created_at         DateTime @default(now())
+
+  job      TokenizationJob?  @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  pii_data PiiData?          @relation(fields: [pii_data_id], references: [id], onDelete: Cascade)
+  rule     TokenizationRule? @relation(fields: [rule_id], references: [id])
+
+  @@map("tokenization_results")
+}
+
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String?  @db.Uuid
+  module_name String?  @db.VarChar(100)
+  activity    String?  @db.VarChar(100)
+  description String?
+  ip_address  String?  @db.VarChar(100)
+  user_agent  String?
+  created_at  DateTime @default(now())
+
+  user User? @relation(fields: [user_id], references: [id])
+
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  setting_key   String   @unique @db.VarChar(100)
+  setting_value String?
+  description   String?
+  updated_by    String?  @db.Uuid
+  updated_at    DateTime @default(now()) @updatedAt
+
+  updater User? @relation(fields: [updated_by], references: [id])
+
+  @@map("system_settings")
+}
