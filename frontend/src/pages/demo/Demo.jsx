@@ -28,8 +28,12 @@ function deterministicOffset(seed, pos, char, modulo) {
 }
 
 // tweakSeed: string → deterministic result; null → random
-function simulate(value, mode, prefixLen, suffixLen, tweakSeed) {
-  const charset = /^\d+$/.test(value) ? '0123456789' : '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+function simulate(value, mode, prefixLen, suffixLen, tweakSeed, maintainChar = true, maintainLen = true) {
+  const numericOnly = /^\d+$/.test(value)
+  const charset = (!maintainChar || !numericOnly)
+    ? '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    : '0123456789'
+
   let prefix = '', suffix = '', core = value
 
   if (mode === 'prefix' || mode === 'both') {
@@ -49,7 +53,16 @@ function simulate(value, mode, prefixLen, suffixLen, tweakSeed) {
       : Math.floor(Math.random() * charset.length)
     return charset[(ci + offset) % charset.length]
   }).join('')
-  return prefix + tok + suffix
+
+  let result = prefix + tok + suffix
+  if (!maintainLen) {
+    // Tambah 1-3 karakter acak di akhir untuk menunjukkan panjang tidak dipertahankan
+    const extra = Math.floor(Math.random() * 3) + 1
+    for (let i = 0; i < extra; i++) {
+      result += charset[Math.floor(Math.random() * charset.length)]
+    }
+  }
+  return result
 }
 
 function ruleSummary(method, mode, pre, suf) {
@@ -190,7 +203,7 @@ export default function Demo() {
       // Dynamic/Randomized → new seed each time = different token
       // No tweak → pure random
       const tweakSeed = useTweak && method?.supports_tweak ? activeTweakVal : null
-      const token = simulate(value, mode, prefixLen, suffixLen, tweakSeed)
+      const token = simulate(value, mode, prefixLen, suffixLen, tweakSeed, maintainChar, maintainLen)
       const now = new Date()
       const r = {
         id:        Date.now().toString(),
