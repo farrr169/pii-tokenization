@@ -71,6 +71,7 @@ async function tokenizeSingle(req, res) {
       return res.status(400).json({ status: 'error', message: result.error });
     }
 
+    let resultId = null;
     if (body.save_result) {
       const crypto = require('crypto');
       const piiRecord = await prisma.piiData.create({
@@ -95,7 +96,7 @@ async function tokenizeSingle(req, res) {
         }
       });
 
-      await prisma.tokenizationResult.create({
+      const savedResult = await prisma.tokenizationResult.create({
         data: {
           job_id: job.id,
           pii_data_id: piiRecord.id,
@@ -105,6 +106,7 @@ async function tokenizeSingle(req, res) {
           status: 'success'
         }
       });
+      resultId = savedResult.id;
     }
 
     await auditFromReq(req, 'tokenization', 'tokenize',
@@ -114,6 +116,7 @@ async function tokenizeSingle(req, res) {
     return res.json({
       status: 'success',
       data: {
+        ...(resultId && { result_id: resultId }),
         tokenized_value: result.tokenized_value,
         method_used: methodConfig.method_name,
         tweak_used: result.tweak_used,
