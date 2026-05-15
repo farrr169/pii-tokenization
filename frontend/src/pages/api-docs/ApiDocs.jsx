@@ -13,11 +13,26 @@ const API = `${BASE_URL}/api`
 function useCopy() {
   const [copiedKey, setCopiedKey] = useState(null)
   const copy = (text, key) => {
-    navigator.clipboard.writeText(text)
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text))
+    } else {
+      fallbackCopy(text)
+    }
     setCopiedKey(key)
     setTimeout(() => setCopiedKey(null), 1500)
   }
   return { copiedKey, copy }
+}
+
+function fallbackCopy(text) {
+  const el = document.createElement('textarea')
+  el.value = text
+  el.style.position = 'fixed'
+  el.style.opacity = '0'
+  document.body.appendChild(el)
+  el.select()
+  document.execCommand('copy')
+  document.body.removeChild(el)
 }
 
 function CopyBtn({ text, id, copiedKey, copy, label = 'Salin ID' }) {
