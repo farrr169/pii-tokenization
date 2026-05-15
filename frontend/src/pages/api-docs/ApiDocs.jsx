@@ -895,7 +895,7 @@ export default function ApiDocs() {
           <Endpoint
             method="GET" path="/api/tokenization-methods"
             title="Daftar Metode Tokenisasi"
-            description="Mengembalikan daftar algoritma tokenisasi yang tersedia."
+            description="Mengembalikan daftar algoritma tokenisasi yang tersedia. Sistem hanya menggunakan satu metode: FF1 (Format-Preserving Encryption)."
             permission="pii_types: read"
             response={`{
   "status": "success",
@@ -903,9 +903,9 @@ export default function ApiDocs() {
     {
       "id":               "c3d4e5f6-a7b8-9012-cdef-123456789012",
       "method_name":      "Full FPE FF1",
-      "description":      "Format-Preserving Encryption menggunakan algoritma FF1",
-      "supports_prefix":  false,
-      "supports_suffix":  false,
+      "description":      "FF1 — Format-Preserving Encryption (AES-based). Mendukung preserve prefix/suffix dan tweak.",
+      "supports_prefix":  true,
+      "supports_suffix":  true,
       "supports_tweak":   true,
       "is_deterministic": true,
       "is_active":        true

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 export const METHODS_LIST = [
-  { id: '1', name: 'Full FPE FF1', label: 'Full FPE FF1 (Format-Preserving Encryption)', description: 'Format-Preserving Encryption menggunakan algoritma FF1. Mendukung konfigurasi preserve prefix/suffix untuk mempertahankan sebagian nilai data asli.', supports_prefix: true, supports_suffix: true, supports_tweak: true, is_deterministic: true },
+  { id: '1', name: 'Full FPE FF1', label: 'FF1', description: 'Format-Preserving Encryption menggunakan algoritma FF1. Mendukung konfigurasi preserve prefix/suffix untuk mempertahankan sebagian nilai data asli.', supports_prefix: true, supports_suffix: true, supports_tweak: true, is_deterministic: true },
 ]
 
 export const TWEAKS_LIST = [
