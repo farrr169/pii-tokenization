@@ -230,7 +230,8 @@ classDiagram
         +Boolean supports_tweak
         +Boolean is_deterministic
         +Boolean is_active
-        %% Satu-satunya metode: Full FPE FF1
+        %% Satu-satunya metode aktif: Full FPE FF1
+        %% supports_prefix=true, supports_suffix=true, supports_tweak=true
         +getDescription() String
     }
 
@@ -295,6 +296,7 @@ classDiagram
         +ResultStatus status
         +String error_message
         +DateTime created_at
+        %% id dikembalikan sebagai result_id di semua response API
         +getToken() String
         +getOriginalValue() String
     }
@@ -413,7 +415,7 @@ flowchart TD
         L["Query tokenization_rule\n+ method (FF1) + tweak dari DB\n(Prisma ORM)"]
         M{"Rule\nditemukan?"}
         N["Gunakan method_id\nlangsung (manual mode)"]
-        Q["Return JSON response:\n✓ tokenized_value\n✓ processing_time_ms\n✓ method_used: Full FPE FF1\n✓ length_preserved"]
+        Q["Return JSON response:\n✓ result_id (jika save_result: true)\n✓ tokenized_value\n✓ processing_time_ms\n✓ method_used: Full FPE FF1\n✓ length_preserved"]
     end
 
     %% ── Swim Lane: FPE Engine / Database ───────────────────────
@@ -557,13 +559,18 @@ graph TB
 | Method | Endpoint | Permission | Deskripsi |
 |--------|----------|-----------|-----------|
 | POST | `/api/auth/login` | Public | Login, return JWT |
-| POST | `/api/tokenization/tokenize` | execute:tokenization | Tokenisasi single (FPE FF1) |
-| POST | `/api/tokenization/batch` | execute:tokenization | Tokenisasi batch |
-| POST | `/api/tokenization/detokenize` | execute:tokenization | Detokenisasi (ambil nilai asli) |
-| GET | `/api/tokenization/results` | read:tokenization | Lihat semua hasil tokenisasi |
+| GET | `/api/auth/profile` | Semua role | Cek profil & validasi token aktif |
+| POST | `/api/auth/logout` | Semua role | Catat sesi keluar ke audit log |
+| POST | `/api/tokenization/tokenize` | execute:tokenization | Tokenisasi single (FPE FF1), return `result_id` jika `save_result: true` |
+| POST | `/api/tokenization/batch` | execute:tokenization | Tokenisasi batch, setiap item return `result_id` |
+| POST | `/api/tokenization/detokenize` | execute:tokenization | Detokenisasi (ambil nilai asli via `result_id`) |
+| GET | `/api/tokenization/results` | read:tokenization | Lihat hasil tokenisasi, tiap item memiliki `result_id` eksplisit |
+| GET | `/api/tokenization/stats` | read:tokenization | Statistik ringkasan operasi tokenisasi |
 | DELETE | `/api/tokenization/results/:id` | Admin only | Hapus satu hasil tokenisasi |
 | DELETE | `/api/tokenization/results` | Admin only | Hapus semua hasil tokenisasi |
-| GET | `/api/audit-logs` | read:audit_logs | Lihat audit log |
+| GET | `/api/audit-logs` | read:audit_logs | Lihat audit log dengan filter modul & aktivitas |
+| POST | `/api/audit-logs/write` | Semua role (login) | Tulis log aktivitas dari frontend |
+| POST | `/api/audit-logs/archive` | Admin only | Arsipkan log > 30 hari ke file |
 | GET | `/api/users` | read:users | Lihat daftar pengguna |
 
 ---
