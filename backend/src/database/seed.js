@@ -86,6 +86,17 @@ async function seed() {
       create: m
     });
   }
+
+  // Remove legacy methods that are no longer supported (non-FF1)
+  const legacyMethods = await prisma.tokenizationMethod.findMany({
+    where: { method_name: { not: 'Full FPE FF1' } }
+  });
+  if (legacyMethods.length > 0) {
+    const legacyIds = legacyMethods.map(m => m.id);
+    await prisma.tokenizationRule.deleteMany({ where: { method_id: { in: legacyIds } } });
+    await prisma.tokenizationMethod.deleteMany({ where: { id: { in: legacyIds } } });
+    console.log('🧹 Legacy methods removed:', legacyMethods.map(m => m.method_name).join(', '));
+  }
   console.log('✅ Tokenization Methods seeded');
 
   // Tweaks
