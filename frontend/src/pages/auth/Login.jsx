@@ -10,7 +10,7 @@ export default function Login() {
   const navigate = useNavigate()
   const { setAuth } = useAuthStore()
   const { addLog } = useAuditStore()
-  const [form, setForm] = useState({ email: 'admin@system.id', password: 'Admin@12345' })
+  const [form, setForm] = useState({ email: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
