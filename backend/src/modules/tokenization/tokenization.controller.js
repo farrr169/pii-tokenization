@@ -189,7 +189,7 @@ async function tokenizeBatch(req, res) {
         }
       });
 
-      await prisma.tokenizationResult.create({
+      const savedBatchResult = await prisma.tokenizationResult.create({
         data: {
           job_id: job.id,
           pii_data_id: piiRecord.id,
@@ -205,6 +205,7 @@ async function tokenizeBatch(req, res) {
       else failed++;
 
       results.push({
+        result_id: savedBatchResult.id,
         original: item.value,
         tokenized: tokenResult.tokenized_value,
         status: tokenResult.success ? 'success' : 'failed'
@@ -306,7 +307,7 @@ async function getResults(req, res) {
 
     return res.json({
       status: 'success',
-      data: results,
+      data: results.map(r => ({ result_id: r.id, ...r })),
       pagination: { total, page: parseInt(page), limit: parseInt(limit) }
     });
   } catch (error) {
