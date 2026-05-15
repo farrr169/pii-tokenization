@@ -14,6 +14,7 @@ export const usersApi = {
   create: (data) => api.post('/users', data),
   update: (id, data) => api.put(`/users/${id}`, data),
   delete: (id) => api.delete(`/users/${id}`),
+  toggleStatus: (id) => api.patch(`/users/${id}/status`),
 }
 
 // ── Roles ─────────────────────────────────────
@@ -64,8 +65,11 @@ export const tweaksApi = {
 export const tokenizationApi = {
   tokenize: (data) => api.post('/tokenization/tokenize', data),
   batch: (data) => api.post('/tokenization/batch', data),
+  detokenize: (data) => api.post('/tokenization/detokenize', data),
   results: (params) => api.get('/tokenization/results', { params }),
   stats: () => api.get('/tokenization/stats'),
+  deleteResult: (id) => api.delete(`/tokenization/results/${id}`),
+  clearResults: () => api.delete('/tokenization/results'),
 }
 
 // ── Jobs ──────────────────────────────────────
@@ -77,6 +81,11 @@ export const jobsApi = {
 // ── Audit Logs ────────────────────────────────
 export const auditApi = {
   list: (params) => api.get('/audit-logs', { params }),
+  write: (data) => api.post('/audit-logs/write', data),
+  modules: () => api.get('/audit-logs/modules'),
+  activities: () => api.get('/audit-logs/activities'),
+  archive: () => api.post('/audit-logs/archive'),
+  archives: () => api.get('/audit-logs/archives'),
 }
 
 // ── Settings ──────────────────────────────────

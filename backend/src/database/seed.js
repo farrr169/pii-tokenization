@@ -11,8 +11,8 @@ async function seed() {
   const roles = await Promise.all([
     prisma.role.upsert({ where: { role_name: 'Admin' }, update: {}, create: { role_name: 'Admin', description: 'Full system access' } }),
     prisma.role.upsert({ where: { role_name: 'Operator' }, update: {}, create: { role_name: 'Operator', description: 'Can perform tokenization operations' } }),
-    prisma.role.upsert({ where: { role_name: 'Auditor' }, update: {}, create: { role_name: 'Auditor', description: 'Read-only access to audit logs' } }),
-    prisma.role.upsert({ where: { role_name: 'Viewer' }, update: {}, create: { role_name: 'Viewer', description: 'Read-only dashboard access' } }),
+    prisma.role.upsert({ where: { role_name: 'Auditor' }, update: {}, create: { role_name: 'Auditor', description: 'Read-only access including audit logs and user management' } }),
+    prisma.role.upsert({ where: { role_name: 'Data Consumer' }, update: {}, create: { role_name: 'Data Consumer', description: 'Read-only access to tokenization and PII data' } }),
   ]);
   console.log('✅ Roles seeded:', roles.map(r => r.role_name).join(', '));
 
@@ -34,13 +34,13 @@ async function seed() {
 
   // Additional users per role
   const operatorRole = roles.find(r => r.role_name === 'Operator');
-  const auditorRole  = roles.find(r => r.role_name === 'Auditor');
-  const viewerRole   = roles.find(r => r.role_name === 'Viewer');
+  const auditorRole       = roles.find(r => r.role_name === 'Auditor');
+  const dataConsumerRole  = roles.find(r => r.role_name === 'Data Consumer');
 
   const additionalUsers = [
-    { full_name: 'Operator Pertama', email: 'operator1@bank.id', password: 'Operator@12345', role_id: operatorRole.id },
-    { full_name: 'Audit Officer',    email: 'auditor1@bank.id',  password: 'Auditor@12345',  role_id: auditorRole.id },
-    { full_name: 'Data Viewer',      email: 'viewer1@bank.id',   password: 'Viewer@12345',   role_id: viewerRole.id },
+    { full_name: 'Operator Pertama', email: 'operator1@bank.id',      password: 'Operator@12345',     role_id: operatorRole.id },
+    { full_name: 'Audit Officer',    email: 'auditor1@bank.id',        password: 'Auditor@12345',      role_id: auditorRole.id },
+    { full_name: 'Data Consumer 1',  email: 'dataconsumer1@bank.id',   password: 'Consumer@12345',     role_id: dataConsumerRole.id },
   ];
 
   for (const u of additionalUsers) {
@@ -74,15 +74,9 @@ async function seed() {
   }
   console.log('✅ PII Types seeded');
 
-  // Tokenization Methods
+  // Tokenization Methods — only FF1 algorithm
   const methods = [
-    { method_name: 'Full FPE FF1', description: 'Format-Preserving Encryption menggunakan FF1 algorithm', supports_tweak: true, is_deterministic: true },
-    { method_name: 'Full FPE FF3', description: 'Format-Preserving Encryption menggunakan FF3-1 algorithm', supports_tweak: true, is_deterministic: true },
-    { method_name: 'Partial FPE', description: 'FPE dengan preserve prefix/suffix', supports_prefix: true, supports_suffix: true, supports_tweak: true, is_deterministic: true },
-    { method_name: 'Masking', description: 'Mengganti karakter dengan mask (*)', supports_prefix: true, supports_suffix: true, is_deterministic: false },
-    { method_name: 'Hashing SHA-256', description: 'One-way hash menggunakan SHA-256', is_deterministic: true },
-    { method_name: 'Deterministic Token', description: 'Token deterministik berbasis lookup', is_deterministic: true },
-    { method_name: 'Random Token', description: 'Token acak non-deterministik', is_deterministic: false },
+    { method_name: 'Full FPE FF1', description: 'Format-Preserving Encryption menggunakan algoritma FF1 (AES-based Feistel network). Mendukung pengaturan preserve prefix/suffix dan tweak.', supports_prefix: true, supports_suffix: true, supports_tweak: true, is_deterministic: true },
   ];
 
   for (const m of methods) {
@@ -144,8 +138,8 @@ async function seed() {
   const ROLE_PERMS = {
     Admin:    { tokenization: ['execute', 'read'], pii_types: ['create', 'read', 'update', 'delete'], audit_logs: ['read'], settings: ['read', 'update'], users: ['create', 'read', 'update', 'delete'] },
     Operator: { tokenization: ['execute', 'read'], pii_types: ['read'],                               audit_logs: [],        settings: [],                users: [] },
-    Auditor:  { tokenization: ['read'],            pii_types: ['read'],                               audit_logs: ['read'], settings: ['read'],           users: ['read'] },
-    Viewer:   { tokenization: ['read'],            pii_types: ['read'],                               audit_logs: [],        settings: ['read'],           users: [] },
+    Auditor:         { tokenization: ['read'], pii_types: ['read'], audit_logs: ['read'], settings: ['read'], users: ['read'] },
+    'Data Consumer': { tokenization: ['read'], pii_types: ['read'], audit_logs: [],       settings: [],        users: [] },
   };
 
   for (const [roleName, modules] of Object.entries(ROLE_PERMS)) {
@@ -192,32 +186,27 @@ async function seed() {
       prisma.piiType.findFirst({ where: { name: 'Nama Lengkap' } }),
     ]);
 
-  const [mFF1, mFF3, mPartial] = await Promise.all([
-    prisma.tokenizationMethod.findFirst({ where: { method_name: 'Full FPE FF1' } }),
-    prisma.tokenizationMethod.findFirst({ where: { method_name: 'Full FPE FF3' } }),
-    prisma.tokenizationMethod.findFirst({ where: { method_name: 'Partial FPE' } }),
-  ]);
+  const mFF1 = await prisma.tokenizationMethod.findFirst({ where: { method_name: 'Full FPE FF1' } });
 
-  const [tStatic, tDynamic, tRandom] = await Promise.all([
+  const [tStatic, tDynamic] = await Promise.all([
     prisma.tweak.findFirst({ where: { tweak_name: 'Static Tweak Default' } }),
     prisma.tweak.findFirst({ where: { tweak_name: 'Dynamic Timestamp' } }),
-    prisma.tweak.findFirst({ where: { tweak_name: 'Randomized 8-byte' } }),
   ]);
 
+  // All rules use FF1 — prefix/suffix preservation is a rule-level setting
   const rules = [
-    { rule_name: 'NIK - Full FPE FF1',            pii_type_id: nikType?.id,      method_id: mFF1?.id,     tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'NIK - Full FPE FF3',            pii_type_id: nikType?.id,      method_id: mFF3?.id,     tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'NIK - Partial FPE (6 Prefix)',  pii_type_id: nikType?.id,      method_id: mPartial?.id, tweak_id: tStatic?.id,  preserve_prefix: 6, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'NPWP - Full FPE FF1',           pii_type_id: npwpType?.id,     method_id: mFF1?.id,     tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'NPWP - Partial FPE (3 Prefix)', pii_type_id: npwpType?.id,     method_id: mPartial?.id, tweak_id: tStatic?.id,  preserve_prefix: 3, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'Rekening - Full FPE FF1',       pii_type_id: rekeningType?.id, method_id: mFF1?.id,     tweak_id: tDynamic?.id, preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'Rekening - Partial FPE (4 Prefix)', pii_type_id: rekeningType?.id, method_id: mPartial?.id, tweak_id: tStatic?.id, preserve_prefix: 4, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'Kartu Kredit - PCI (6-4)',      pii_type_id: kkType?.id,       method_id: mPartial?.id, tweak_id: tRandom?.id,  preserve_prefix: 6, preserve_suffix: 4, maintain_length: true },
-    { rule_name: 'Kartu Kredit - Full FPE FF1',   pii_type_id: kkType?.id,       method_id: mFF1?.id,     tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'Telepon - Full FPE FF1',        pii_type_id: teleponType?.id,  method_id: mFF1?.id,     tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'Telepon - Partial FPE (3 Prefix)', pii_type_id: teleponType?.id, method_id: mPartial?.id, tweak_id: tStatic?.id, preserve_prefix: 3, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'Passport - Full FPE FF3',       pii_type_id: passportType?.id, method_id: mFF3?.id,     tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
-    { rule_name: 'Nama - Full FPE FF1',           pii_type_id: namaType?.id,     method_id: mFF1?.id,     tweak_id: tDynamic?.id, preserve_prefix: 0, preserve_suffix: 0, maintain_length: false },
+    { rule_name: 'NIK - Full FPE FF1',               pii_type_id: nikType?.id,      method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'NIK - Partial FPE (6 Prefix)',      pii_type_id: nikType?.id,      method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 6, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'NPWP - Full FPE FF1',               pii_type_id: npwpType?.id,     method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'NPWP - Partial FPE (3 Prefix)',     pii_type_id: npwpType?.id,     method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 3, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'Rekening - Full FPE FF1',           pii_type_id: rekeningType?.id, method_id: mFF1?.id, tweak_id: tDynamic?.id, preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'Rekening - Partial FPE (4 Prefix)', pii_type_id: rekeningType?.id, method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 4, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'Kartu Kredit - PCI (6-4)',          pii_type_id: kkType?.id,       method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 6, preserve_suffix: 4, maintain_length: true },
+    { rule_name: 'Kartu Kredit - Full FPE FF1',       pii_type_id: kkType?.id,       method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'Telepon - Full FPE FF1',            pii_type_id: teleponType?.id,  method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'Telepon - Partial FPE (3 Prefix)',  pii_type_id: teleponType?.id,  method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 3, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'Passport - Full FPE FF1',           pii_type_id: passportType?.id, method_id: mFF1?.id, tweak_id: tStatic?.id,  preserve_prefix: 0, preserve_suffix: 0, maintain_length: true },
+    { rule_name: 'Nama - Full FPE FF1',               pii_type_id: namaType?.id,     method_id: mFF1?.id, tweak_id: tDynamic?.id, preserve_prefix: 0, preserve_suffix: 0, maintain_length: false },
   ];
 
   for (const rule of rules) {

@@ -1,10 +1,8 @@
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../../config/db');
 const { tokenize } = require('./fpe.service');
 const { z } = require('zod');
+const { auditFromReq } = require('../../utils/auditLog');
 
-const prisma = new PrismaClient();
-
-// Validation schema
 const tokenizeSchema = z.object({
   pii_type_id: z.string().uuid(),
   method_id: z.string().uuid(),
@@ -22,18 +20,19 @@ const batchSchema = z.object({
   })).min(1).max(1000)
 });
 
+const detokenizeSchema = z.object({
+  result_id: z.string().uuid(),
+});
+
 /**
  * POST /api/tokenization/tokenize
- * Single tokenisasi
  */
 async function tokenizeSingle(req, res) {
   try {
     const body = tokenizeSchema.parse(req.body);
 
-    // Get rule & method config
     let rule = null;
     let method = null;
-    let tweak = null;
 
     if (body.rule_id) {
       rule = await prisma.tokenizationRule.findUnique({
@@ -43,9 +42,7 @@ async function tokenizeSingle(req, res) {
     }
 
     if (!rule) {
-      method = await prisma.tokenizationMethod.findUnique({
-        where: { id: body.method_id }
-      });
+      method = await prisma.tokenizationMethod.findUnique({ where: { id: body.method_id } });
     }
 
     const methodConfig = rule?.method || method;
@@ -55,7 +52,6 @@ async function tokenizeSingle(req, res) {
       return res.status(404).json({ status: 'error', message: 'Method tidak ditemukan' });
     }
 
-    // Perform tokenization
     const result = tokenize({
       value: body.value,
       method: methodConfig.method_name,
@@ -71,10 +67,10 @@ async function tokenizeSingle(req, res) {
     });
 
     if (!result.success) {
+      await auditFromReq(req, 'tokenization', 'tokenize_failed', `Tokenisasi ${methodConfig.method_name} gagal: ${result.error}`);
       return res.status(400).json({ status: 'error', message: result.error });
     }
 
-    // Optionally save to DB
     if (body.save_result) {
       const crypto = require('crypto');
       const piiRecord = await prisma.piiData.create({
@@ -111,16 +107,9 @@ async function tokenizeSingle(req, res) {
       });
     }
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        user_id: req.user?.id,
-        module_name: 'tokenization',
-        activity: 'tokenize',
-        description: `Tokenisasi ${methodConfig.method_name} berhasil`,
-        ip_address: req.ip
-      }
-    });
+    await auditFromReq(req, 'tokenization', 'tokenize',
+      `Tokenisasi ${methodConfig.method_name} berhasil${body.save_result ? ' dan disimpan' : ''}`
+    );
 
     return res.json({
       status: 'success',
@@ -144,7 +133,6 @@ async function tokenizeSingle(req, res) {
 
 /**
  * POST /api/tokenization/batch
- * Batch tokenisasi
  */
 async function tokenizeBatch(req, res) {
   try {
@@ -159,7 +147,6 @@ async function tokenizeBatch(req, res) {
       return res.status(404).json({ status: 'error', message: 'Rule tidak ditemukan' });
     }
 
-    // Create job
     const job = await prisma.tokenizationJob.create({
       data: {
         job_name: body.job_name,
@@ -170,7 +157,6 @@ async function tokenizeBatch(req, res) {
       }
     });
 
-    // Process each record
     const results = [];
     let success = 0;
     let failed = 0;
@@ -200,7 +186,7 @@ async function tokenizeBatch(req, res) {
         }
       });
 
-      const resultRecord = await prisma.tokenizationResult.create({
+      await prisma.tokenizationResult.create({
         data: {
           job_id: job.id,
           pii_data_id: piiRecord.id,
@@ -222,26 +208,18 @@ async function tokenizeBatch(req, res) {
       });
     }
 
-    // Update job status
     await prisma.tokenizationJob.update({
       where: { id: job.id },
-      data: {
-        success_count: success,
-        failed_count: failed,
-        status: failed === 0 ? 'completed' : 'completed',
-        completed_at: new Date()
-      }
+      data: { success_count: success, failed_count: failed, status: 'completed', completed_at: new Date() }
     });
+
+    await auditFromReq(req, 'tokenization', 'batch_tokenize',
+      `Batch tokenisasi "${body.job_name}": ${body.data.length} data, ${success} berhasil, ${failed} gagal`
+    );
 
     return res.json({
       status: 'success',
-      data: {
-        job_id: job.id,
-        total: body.data.length,
-        success,
-        failed,
-        results
-      }
+      data: { job_id: job.id, total: body.data.length, success, failed, results }
     });
 
   } catch (error) {
@@ -250,6 +228,52 @@ async function tokenizeBatch(req, res) {
     }
     console.error(error);
     return res.status(500).json({ status: 'error', message: 'Internal server error' });
+  }
+}
+
+/**
+ * POST /api/tokenization/detokenize
+ * Retrieve original PII value for a given tokenization result (authorized access only)
+ */
+async function detokenize(req, res) {
+  try {
+    const { result_id } = detokenizeSchema.parse(req.body);
+
+    const result = await prisma.tokenizationResult.findUnique({
+      where: { id: result_id },
+      include: {
+        pii_data: { include: { pii_type: true } },
+        rule: { select: { rule_name: true } },
+        job: { select: { job_name: true } },
+      }
+    });
+
+    if (!result) {
+      return res.status(404).json({ status: 'error', message: 'Hasil tokenisasi tidak ditemukan' });
+    }
+
+    await auditFromReq(req, 'tokenization', 'detokenize',
+      `Detokenisasi result_id=${result_id}, rule="${result.rule?.rule_name || '-'}", type="${result.pii_data?.pii_type?.name || '-'}"`
+    );
+
+    return res.json({
+      status: 'success',
+      data: {
+        result_id: result.id,
+        tokenized_value: result.tokenized_value,
+        original_value: result.pii_data?.original_value,
+        pii_type: result.pii_data?.pii_type?.name,
+        rule_name: result.rule?.rule_name,
+        job_name: result.job?.job_name,
+        tokenized_at: result.created_at,
+      }
+    });
+
+  } catch (error) {
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ status: 'error', errors: error.errors });
+    }
+    return res.status(500).json({ status: 'error', message: error.message });
   }
 }
 
@@ -326,4 +350,41 @@ async function getStats(req, res) {
   }
 }
 
-module.exports = { tokenizeSingle, tokenizeBatch, getResults, getStats };
+/**
+ * DELETE /api/tokenization/results/:id  (Admin only)
+ */
+async function deleteResult(req, res) {
+  try {
+    if (req.user?.role !== 'Admin') {
+      return res.status(403).json({ status: 'error', message: 'Hanya Admin yang dapat menghapus data tokenisasi' });
+    }
+    const { id } = req.params;
+    const existing = await prisma.tokenizationResult.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ status: 'error', message: 'Data tidak ditemukan' });
+
+    await prisma.tokenizationResult.delete({ where: { id } });
+    await auditFromReq(req, 'tokenization', 'delete', `Hasil tokenisasi dihapus (ID: ${id})`);
+    return res.json({ status: 'success', message: 'Data berhasil dihapus' });
+  } catch (error) {
+    if (error.code === 'P2025') return res.status(404).json({ status: 'error', message: 'Data tidak ditemukan' });
+    return res.status(500).json({ status: 'error', message: error.message });
+  }
+}
+
+/**
+ * DELETE /api/tokenization/results  (Admin only — hapus semua)
+ */
+async function clearResults(req, res) {
+  try {
+    if (req.user?.role !== 'Admin') {
+      return res.status(403).json({ status: 'error', message: 'Hanya Admin yang dapat menghapus data tokenisasi' });
+    }
+    const { count } = await prisma.tokenizationResult.deleteMany({});
+    await auditFromReq(req, 'tokenization', 'delete', `Semua hasil tokenisasi dihapus (${count} data)`);
+    return res.json({ status: 'success', message: `${count} data berhasil dihapus` });
+  } catch (error) {
+    return res.status(500).json({ status: 'error', message: error.message });
+  }
+}
+
+module.exports = { tokenizeSingle, tokenizeBatch, detokenize, getResults, getStats, deleteResult, clearResults };

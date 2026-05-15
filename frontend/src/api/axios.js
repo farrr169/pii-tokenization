@@ -20,7 +20,11 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // Skip redirect for audit write and logout — these run during logout flow
+    const url = error.config?.url || ''
+    const isLogoutFlow = url.includes('/auth/logout') || url.includes('/audit-logs/write')
+
+    if (error.response?.status === 401 && !isLogoutFlow) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       window.location.href = '/login'

@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '../../components/layout/DashboardLayout'
 import { Copy, RefreshCw, Save, Play, CheckCircle, Zap } from 'lucide-react'
 import { usePiiStore } from '../../store/pii.store'
 import { useResultsStore } from '../../store/results.store'
 import { useRulesStore, METHODS_LIST, TWEAKS_LIST } from '../../store/rules.store'
+import { useAuditStore } from '../../store/audit.store'
+import { piiTypesApi, methodsApi, rulesApi, tokenizationApi } from '../../api'
 
 function genTweakValue(tweak) {
   if (!tweak) return ''
@@ -69,7 +71,25 @@ export default function Demo() {
   const navigate   = useNavigate()
   const { piiTypes }  = usePiiStore()
   const { rules }     = useRulesStore()
+  const { addLog }    = useAuditStore()
   const activePii     = piiTypes.filter(p => p.is_active)
+
+  // Real data from backend for persistence
+  const [realPiiTypes, setRealPiiTypes] = useState([])
+  const [realMethods,  setRealMethods]  = useState([])
+  const [realRules,    setRealRules]    = useState([])
+
+  useEffect(() => {
+    Promise.all([
+      piiTypesApi.list({ limit: 100 }),
+      methodsApi.list({ limit: 100 }),
+      rulesApi.list({ limit: 100 }),
+    ]).then(([piis, methods, rulesList]) => {
+      setRealPiiTypes(piis.data.data || [])
+      setRealMethods(methods.data.data || [])
+      setRealRules(rulesList.data.data || [])
+    }).catch(() => {})
+  }, [])
 
   // ── Config state ──────────────────────────────────────────────
   const [piiId,      setPiiId]      = useState('1')
@@ -87,7 +107,7 @@ export default function Demo() {
   const [result,     setResult]     = useState(null)
   const [loading,    setLoading]    = useState(false)
   const [saved,      setSaved]      = useState(false)
-  const { save: saveResult, addHistory, history } = useResultsStore()
+  const { addHistory, history } = useResultsStore()
 
   const pii    = piiTypes.find(p => p.id === piiId)
   const method = METHODS_LIST.find(m => m.id === methodId)
@@ -185,6 +205,7 @@ export default function Demo() {
       }
       setResult(r)
       addHistory(r)
+      addLog({ module: 'tokenization', activity: 'tokenize', description: `Tokenisasi ${r.pii} dengan ${r.method} (rule: ${r.rule})` })
       setLoading(false)
     }, 400)
   }
@@ -195,11 +216,27 @@ export default function Demo() {
     setValue(pii?.example_value || '')
   }
 
-  const handleSave = () => {
-    if (!result) return
-    const configLabel = selectedRule ? selectedRule.rule_name : ruleSummary(method, mode, prefixLen, suffixLen)
-    saveResult({ ...result, name: `Demo ${result.pii} - ${configLabel}` })
+  const handleSave = async () => {
+    if (!result || saved) return
     setSaved(true)
+    // Try to persist to DB using real API IDs matched by name
+    const realPii    = realPiiTypes.find(p => p.name === result.pii)
+    const realRule   = selectedRule ? realRules.find(r => r.rule_name === selectedRule.rule_name) : null
+    const realMethod = realMethods.find(m => m.method_name === result.method)
+    if (realPii && (realRule || realMethod)) {
+      try {
+        await tokenizationApi.tokenize({
+          pii_type_id: realPii.id,
+          method_id:   realRule?.method_id || realMethod?.id,
+          rule_id:     realRule?.id,
+          value:       result.original,
+          save_result: true,
+        })
+      } catch (e) {
+        console.error('Demo: gagal simpan ke DB', e)
+      }
+    }
+    addLog({ module: 'tokenization', activity: 'tokenize', description: `Hasil tokenisasi ${result.pii} disimpan (metode: ${result.method})` })
   }
 
   const showMethodConfig = method?.supports_prefix || method?.supports_suffix

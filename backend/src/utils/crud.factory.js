@@ -1,16 +1,31 @@
-// ============================================================
-// Generic CRUD Factory untuk semua modul
-// ============================================================
-
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../config/db');
 const express = require('express');
-const prisma = new PrismaClient();
+const { auditFromReq } = require('./auditLog');
+
+// Human-readable labels per model for audit descriptions
+const MODEL_LABELS = {
+  user: 'User',
+  role: 'Role',
+  permission: 'Permission',
+  piiType: 'PII Type',
+  tokenizationMethod: 'Metode Tokenisasi',
+  tokenizationRule: 'Rule Tokenisasi',
+  tweak: 'Tweak',
+  tokenizationJob: 'Job Tokenisasi',
+  systemSetting: 'Pengaturan',
+};
+
+function nameOf(record) {
+  return record?.full_name || record?.rule_name || record?.method_name || record?.role_name
+    || record?.permission_name || record?.name || record?.job_name || record?.key || record?.id || '';
+}
 
 function createCrudRoutes(modelName, options = {}) {
   const router = express.Router();
   const { authenticate } = require('../middlewares/auth.middleware');
   const { authorize } = require('../middlewares/role.middleware');
   const mod = options.permissionModule;
+  const label = MODEL_LABELS[modelName] || modelName;
   const passThrough = (req, res, next) => next();
 
   router.use(authenticate);
@@ -69,6 +84,9 @@ function createCrudRoutes(modelName, options = {}) {
   router.post('/', mod ? authorize('create', mod) : passThrough, async (req, res) => {
     try {
       const record = await prisma[modelName].create({ data: req.body });
+      if (mod) {
+        await auditFromReq(req, mod, 'create', `${label} "${nameOf(record)}" ditambahkan`);
+      }
       return res.status(201).json({ status: 'success', data: record });
     } catch (error) {
       return res.status(400).json({ status: 'error', message: error.message });
@@ -82,6 +100,9 @@ function createCrudRoutes(modelName, options = {}) {
         where: { id: req.params.id },
         data: req.body
       });
+      if (mod) {
+        await auditFromReq(req, mod, 'update', `${label} "${nameOf(record)}" diperbarui`);
+      }
       return res.json({ status: 'success', data: record });
     } catch (error) {
       if (error.code === 'P2025') {
@@ -94,7 +115,18 @@ function createCrudRoutes(modelName, options = {}) {
   // DELETE
   router.delete('/:id', mod ? authorize('delete', mod) : passThrough, async (req, res) => {
     try {
+      // Fetch name before deletion for the log description
+      let recordName = req.params.id;
+      try {
+        const existing = await prisma[modelName].findUnique({ where: { id: req.params.id } });
+        if (existing) recordName = nameOf(existing);
+      } catch (_) {}
+
       await prisma[modelName].delete({ where: { id: req.params.id } });
+
+      if (mod) {
+        await auditFromReq(req, mod, 'delete', `${label} "${recordName}" dihapus`);
+      }
       return res.json({ status: 'success', message: 'Data berhasil dihapus' });
     } catch (error) {
       if (error.code === 'P2025') {
@@ -107,5 +139,4 @@ function createCrudRoutes(modelName, options = {}) {
   return router;
 }
 
-// Export routes untuk masing-masing modul
 module.exports = createCrudRoutes;

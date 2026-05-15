@@ -1,21 +1,13 @@
 import { create } from 'zustand'
+import { auditApi } from '../api'
 
 export const useAuditStore = create((set) => ({
   logs: [],
-  addLog: ({ module, activity, description, user }) => {
-    set(s => ({
-      logs: [
-        {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          user: user ? { full_name: user.full_name } : { full_name: 'System' },
-          module_name: module,
-          activity,
-          description,
-          created_at: new Date().toISOString(),
-        },
-        ...s.logs,
-      ].slice(0, 300),
-    }))
+
+  addLog: ({ module, activity, description }) => {
+    // Persist to backend (fire-and-forget, non-blocking)
+    auditApi.write({ module_name: module, activity, description }).catch(() => {});
   },
+
   clear: () => set({ logs: [] }),
 }))

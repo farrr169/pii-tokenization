@@ -1,9 +1,8 @@
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { z } = require('zod');
-
-const prisma = new PrismaClient();
+const { logActivity } = require('../../utils/auditLog');
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -18,6 +17,9 @@ const registerSchema = z.object({
 });
 
 async function login(req, res) {
+  const ip = req.ip;
+  const ua = req.headers['user-agent'];
+
   try {
     const { email, password } = loginSchema.parse(req.body);
 
@@ -35,19 +37,21 @@ async function login(req, res) {
     });
 
     if (!user) {
+      await logActivity({ moduleName: 'auth', activity: 'login_failed', description: `Login gagal: email tidak ditemukan (${email})`, ipAddress: ip, userAgent: ua });
       return res.status(401).json({ status: 'error', message: 'Email atau password salah' });
     }
 
     if (user.status !== 'active') {
+      await logActivity({ userId: user.id, moduleName: 'auth', activity: 'login_failed', description: `Login gagal: akun tidak aktif (${email})`, ipAddress: ip, userAgent: ua });
       return res.status(403).json({ status: 'error', message: 'Akun tidak aktif' });
     }
 
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
     if (!isValidPassword) {
+      await logActivity({ userId: user.id, moduleName: 'auth', activity: 'login_failed', description: `Login gagal: password salah (${email})`, ipAddress: ip, userAgent: ua });
       return res.status(401).json({ status: 'error', message: 'Email atau password salah' });
     }
 
-    // Build permissions
     const permissions = user.role?.role_permissions.map(rp => ({
       module: rp.permission.module_name,
       action: rp.permission.permission_name
@@ -59,22 +63,15 @@ async function login(req, res) {
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
-    // Update last login
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { last_login: new Date() }
-    });
+    await prisma.user.update({ where: { id: user.id }, data: { last_login: new Date() } });
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        user_id: user.id,
-        module_name: 'auth',
-        activity: 'login',
-        description: `User ${email} berhasil login`,
-        ip_address: req.ip,
-        user_agent: req.headers['user-agent']
-      }
+    await logActivity({
+      userId: user.id,
+      moduleName: 'auth',
+      activity: 'login',
+      description: `Login berhasil sebagai ${user.role?.role_name || 'User'}`,
+      ipAddress: ip,
+      userAgent: ua,
     });
 
     return res.json({
@@ -100,43 +97,59 @@ async function login(req, res) {
   }
 }
 
+async function logout(req, res) {
+  try {
+    await logActivity({
+      userId: req.user?.id,
+      moduleName: 'auth',
+      activity: 'logout',
+      description: `Logout: ${req.user?.email}`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+    return res.json({ status: 'success', message: 'Logout berhasil' });
+  } catch (error) {
+    return res.status(500).json({ status: 'error', message: error.message });
+  }
+}
+
 async function register(req, res) {
+  const ip = req.ip;
+  const ua = req.headers['user-agent'];
+
   try {
     const data = registerSchema.parse(req.body);
 
-    // Check email exists
     const existing = await prisma.user.findUnique({ where: { email: data.email } });
     if (existing) {
       return res.status(400).json({ status: 'error', message: 'Email sudah terdaftar' });
     }
 
-    // Get default role (Viewer) if not specified
     let roleId = data.role_id;
     if (!roleId) {
-      const viewerRole = await prisma.role.findFirst({ where: { role_name: 'Viewer' } });
+      const viewerRole = await prisma.role.findFirst({ where: { role_name: 'Data Consumer' } });
       roleId = viewerRole?.id;
     }
 
     const password_hash = await bcrypt.hash(data.password, 12);
 
     const user = await prisma.user.create({
-      data: {
-        full_name: data.full_name,
-        email: data.email,
-        password_hash,
-        role_id: roleId
-      },
+      data: { full_name: data.full_name, email: data.email, password_hash, role_id: roleId },
       include: { role: true }
+    });
+
+    await logActivity({
+      userId: req.user?.id || null,
+      moduleName: 'auth',
+      activity: 'register',
+      description: `User baru didaftarkan: ${data.full_name} (${data.email}) sebagai ${user.role?.role_name || 'Viewer'}`,
+      ipAddress: ip,
+      userAgent: ua,
     });
 
     return res.status(201).json({
       status: 'success',
-      data: {
-        id: user.id,
-        full_name: user.full_name,
-        email: user.email,
-        role: user.role?.role_name
-      }
+      data: { id: user.id, full_name: user.full_name, email: user.email, role: user.role?.role_name }
     });
 
   } catch (error) {
@@ -182,4 +195,4 @@ async function getProfile(req, res) {
   }
 }
 
-module.exports = { login, register, getProfile };
+module.exports = { login, logout, register, getProfile };

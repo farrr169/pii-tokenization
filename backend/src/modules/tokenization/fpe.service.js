@@ -117,40 +117,8 @@ function tokenize(options) {
     const charset = maintainCharset ? detectCharset(core) : ALPHANUMERIC_CHARSET;
     const tweak = tweakConfig ? generateTweak(tweakConfig) : crypto.randomBytes(8);
 
-    let tokenized;
-
-    switch (method) {
-      case 'Full FPE FF1':
-      case 'Full FPE FF3':
-      case 'Partial FPE':
-        tokenized = fpeEncrypt(core, key, tweak, charset);
-        break;
-
-      case 'Masking':
-        // Masking: tampilkan prefix/suffix, '*' untuk tengah
-        tokenized = core.split('').map((c, i) => {
-          if (i < 2 || i >= core.length - 2) return c;
-          return charset.includes(c) ? '*' : c;
-        }).join('');
-        break;
-
-      case 'Hashing SHA-256':
-        tokenized = crypto.createHash('sha256').update(core).digest('hex').substring(0, core.length);
-        break;
-
-      case 'Random Token':
-        if (/^\d+$/.test(core)) {
-          tokenized = Array.from({ length: core.length }, () =>
-            Math.floor(Math.random() * 10).toString()
-          ).join('');
-        } else {
-          tokenized = crypto.randomBytes(core.length).toString('hex').substring(0, core.length);
-        }
-        break;
-
-      default:
-        tokenized = fpeEncrypt(core, key, tweak, charset);
-    }
+    // Only FF1 algorithm is supported
+    const tokenized = fpeEncrypt(core, key, tweak, charset);
 
     const result = prefix + tokenized + suffix;
     const processingTime = Date.now() - startTime;

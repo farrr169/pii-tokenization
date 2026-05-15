@@ -16,6 +16,7 @@ const jobRoutes = require('./modules/jobs/jobs.routes');
 const auditRoutes = require('./modules/audit-logs/audit-logs.routes');
 const settingsRoutes = require('./modules/settings/settings.routes');
 const { errorMiddleware } = require('./middlewares/error.middleware');
+const { startRetentionJob } = require('./jobs/retention.job');
 
 const app = express();
 
@@ -68,5 +69,8 @@ app.use((req, res) => {
 
 // Global error handler
 app.use(errorMiddleware);
+
+// Start scheduled jobs
+startRetentionJob();
 
 module.exports = app;

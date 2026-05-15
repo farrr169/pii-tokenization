@@ -2,10 +2,10 @@ import { create } from 'zustand'
 import { useAuthStore } from './auth.store'
 
 export const INIT_PERMISSIONS = {
-  Admin:    { tokenization: ['execute', 'read'], pii_types: ['create', 'read', 'update', 'delete'], audit_logs: ['read'], settings: ['read', 'update'], users: ['create', 'read', 'update', 'delete'] },
-  Operator: { tokenization: ['execute', 'read'], pii_types: ['read'],                               audit_logs: [],        settings: [],                users: [] },
-  Auditor:  { tokenization: ['read'],            pii_types: ['read'],                               audit_logs: ['read'], settings: ['read'],           users: ['read'] },
-  Viewer:   { tokenization: ['read'],            pii_types: ['read'],                               audit_logs: [],        settings: ['read'],           users: [] },
+  Admin:         { tokenization: ['execute', 'read'], pii_types: ['create', 'read', 'update', 'delete'], audit_logs: ['read'], settings: ['read', 'update'], users: ['create', 'read', 'update', 'delete'] },
+  Operator:      { tokenization: ['execute', 'read'], pii_types: ['read'],                               audit_logs: [],        settings: [],                users: [] },
+  Auditor:         { tokenization: ['read'], pii_types: ['read'], audit_logs: ['read'], settings: ['read'], users: ['read'] },
+  'Data Consumer': { tokenization: ['read'], pii_types: ['read'], audit_logs: [],       settings: [],       users: [] },
 }
 
 export const usePermissionsStore = create(set => ({

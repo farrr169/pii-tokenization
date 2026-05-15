@@ -1,7 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/auth.store'
 import { usePiiStore } from './store/pii.store'
-import { useResultsStore } from './store/results.store'
 import { useAuditStore } from './store/audit.store'
 import { useRulesStore, METHODS_LIST, TWEAKS_LIST } from './store/rules.store'
 import { useHasPermission } from './store/permissions.store'
@@ -18,8 +17,9 @@ import TweakPage from './pages/tweaks/TweakPage'
 // Lazy-ish inline pages for remaining routes
 import { DashboardLayout } from './components/layout/DashboardLayout'
 import { DataTable, StatusBadge, Badge, SearchInput, Button, Modal, FormField } from './components/ui'
-import { useState } from 'react'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Plus, Pencil, Trash2, RefreshCw, Archive, ChevronLeft, ChevronRight } from 'lucide-react'
+import { auditApi, tokenizationApi } from './api'
 
 // ── Protected Route ────────────────────────────────────────────
 function Protected({ children, module, action }) {
@@ -299,87 +299,176 @@ function RulesPage() {
 const fmtDate = d => new Date(d).toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
 
 // ── Audit Page ─────────────────────────────────────────────────
-const MOD_COLORS   = { auth:'green', users:'blue', pii_types:'gray', rules:'amber', tweaks:'amber', settings:'red', permissions:'red' }
-const ACT_COLORS   = { login:'green', logout:'gray', create:'green', update:'blue', delete:'red', activate:'green', deactivate:'gray' }
-const MOD_LABELS   = { auth:'Auth', users:'Users', pii_types:'PII Types', rules:'Rules', tweaks:'Tweaks', settings:'Pengaturan', permissions:'Permissions' }
-const ACT_LABELS   = { login:'Login', logout:'Logout', create:'Tambah', update:'Ubah', delete:'Hapus', activate:'Aktifkan', deactivate:'Nonaktifkan' }
+const MOD_COLORS = {
+  auth: 'green', users: 'blue', roles: 'blue', permissions: 'red',
+  pii_types: 'gray', tokenization_methods: 'amber', tokenization_rules: 'amber',
+  rules: 'amber', tweaks: 'amber', tokenization: 'blue', settings: 'red',
+  audit_logs: 'gray', jobs: 'gray',
+}
+const ACT_COLORS = {
+  login: 'green', login_failed: 'red', logout: 'gray', register: 'green',
+  create: 'green', update: 'blue', delete: 'red',
+  activate: 'green', deactivate: 'gray', nonaktifkan: 'gray',
+  tokenize: 'blue', tokenize_failed: 'red', batch_tokenize: 'blue', detokenize: 'amber',
+  archive: 'amber', read: 'gray',
+}
+const MOD_LABELS = {
+  auth: 'Auth', users: 'Users', roles: 'Roles', permissions: 'Permissions',
+  pii_types: 'PII Types', tokenization_methods: 'Metode', tokenization_rules: 'Rules',
+  rules: 'Rules', tweaks: 'Tweaks', tokenization: 'Tokenisasi', settings: 'Pengaturan',
+  audit_logs: 'Audit Log', jobs: 'Jobs',
+}
+const ACT_LABELS = {
+  login: 'Login', login_failed: 'Login Gagal', logout: 'Logout', register: 'Daftar',
+  create: 'Tambah', update: 'Ubah', delete: 'Hapus', activate: 'Aktifkan', deactivate: 'Nonaktifkan',
+  tokenize: 'Tokenisasi', tokenize_failed: 'Tok. Gagal', batch_tokenize: 'Batch Tok.',
+  detokenize: 'Detokenisasi', archive: 'Arsip', read: 'Baca',
+}
+
+const ACT_VARIANT = {
+  green: 'bg-green-50 text-green-700',
+  blue: 'bg-blue-50 text-blue-700',
+  red: 'bg-red-50 text-red-600',
+  gray: 'bg-gray-100 text-gray-500',
+  amber: 'bg-amber-50 text-amber-700',
+}
 
 function ActivityBadge({ activity }) {
   const color = ACT_COLORS[activity] || 'gray'
-  const variants = {
-    green: 'bg-green-50 text-green-700',
-    blue:  'bg-blue-50 text-blue-700',
-    red:   'bg-red-50 text-red-600',
-    gray:  'bg-gray-100 text-gray-500',
-    amber: 'bg-amber-50 text-amber-700',
-  }
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${variants[color]}`}>
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ACT_VARIANT[color]}`}>
       {ACT_LABELS[activity] || activity}
     </span>
   )
 }
 
 function AuditPage() {
-  const { logs, clear } = useAuditStore()
   const { user: currentUser } = useAuthStore()
-  const [modFilter,  setModFilter]  = useState('')
-  const [actFilter,  setActFilter]  = useState('')
+  const isAdmin = currentUser?.role === 'Admin'
 
-  const modules    = [...new Set(logs.map(l => l.module_name))].sort()
-  const activities = [...new Set(logs.map(l => l.activity))].sort()
+  const [logs, setLogs]             = useState([])
+  const [loading, setLoading]       = useState(false)
+  const [modFilter, setModFilter]   = useState('')
+  const [actFilter, setActFilter]   = useState('')
+  const [page, setPage]             = useState(1)
+  const [pagination, setPagination] = useState({ total: 0, pages: 1 })
+  const [retentionDays, setRetentionDays] = useState(30)
+  const [archiving, setArchiving]   = useState(false)
+  const [archiveMsg, setArchiveMsg] = useState('')
+  const LIMIT = 50
 
-  const filtered = logs.filter(l =>
-    (!modFilter || l.module_name === modFilter) &&
-    (!actFilter || l.activity   === actFilter)
-  )
+  const fetchLogs = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params = { page, limit: LIMIT }
+      if (modFilter) params.module_name = modFilter
+      if (actFilter) params.activity    = actFilter
+      const res = await auditApi.list(params)
+      setLogs(res.data.data)
+      setPagination(res.data.pagination)
+      if (res.data.retention_days) setRetentionDays(res.data.retention_days)
+    } catch (e) {
+      console.error('Audit log fetch failed:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [page, modFilter, actFilter])
+
+  useEffect(() => { fetchLogs() }, [fetchLogs])
+
+  // Reset to page 1 when filters change
+  useEffect(() => { setPage(1) }, [modFilter, actFilter])
+
+  const handleArchive = async () => {
+    if (!window.confirm(`Arsipkan semua log lebih dari ${retentionDays} hari ke file .log dan hapus dari database?`)) return
+    setArchiving(true)
+    setArchiveMsg('')
+    try {
+      const res = await auditApi.archive()
+      const { archived, file } = res.data.data
+      setArchiveMsg(archived > 0 ? `${archived} log diarsipkan.` : 'Tidak ada log yang perlu diarsipkan.')
+      fetchLogs()
+    } catch (e) {
+      setArchiveMsg('Arsip gagal: ' + (e.response?.data?.message || e.message))
+    } finally {
+      setArchiving(false)
+    }
+  }
+
+  const allModules   = Object.keys(MOD_LABELS)
+  const allActivities = Object.keys(ACT_LABELS)
 
   return (
     <DashboardLayout title="Audit Log" actions={
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <select className="select-field text-sm w-auto" value={modFilter} onChange={e => setModFilter(e.target.value)}>
           <option value="">Semua Modul</option>
-          {modules.map(m => <option key={m} value={m}>{MOD_LABELS[m] || m}</option>)}
+          {allModules.map(m => <option key={m} value={m}>{MOD_LABELS[m]}</option>)}
         </select>
         <select className="select-field text-sm w-auto" value={actFilter} onChange={e => setActFilter(e.target.value)}>
           <option value="">Semua Aktivitas</option>
-          {activities.map(a => <option key={a} value={a}>{ACT_LABELS[a] || a}</option>)}
+          {allActivities.map(a => <option key={a} value={a}>{ACT_LABELS[a]}</option>)}
         </select>
-        {logs.length > 0 && currentUser?.role === 'Admin' && (
-          <button onClick={() => { if (window.confirm('Bersihkan semua audit log?')) clear() }}
-            className="btn-secondary text-xs px-3 py-1.5">Bersihkan</button>
+        <button onClick={fetchLogs} title="Refresh" className="btn-secondary p-1.5">
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        </button>
+        {isAdmin && (
+          <button onClick={handleArchive} disabled={archiving}
+            className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
+            <Archive size={13} />
+            {archiving ? 'Mengarsipkan…' : `Arsipkan (>${retentionDays}h)`}
+          </button>
         )}
       </div>
     }>
-      {logs.length === 0 ? (
+      {archiveMsg && (
+        <div className="mb-3 px-4 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
+          {archiveMsg}
+        </div>
+      )}
+
+      {loading && logs.length === 0 ? (
+        <div className="card text-center py-16 text-gray-300 text-sm">Memuat log…</div>
+      ) : logs.length === 0 ? (
         <div className="card text-center py-16 space-y-2">
           <p className="text-gray-300 text-sm">Belum ada aktivitas yang tercatat.</p>
-          <p className="text-gray-400 text-xs">Log akan muncul saat Anda melakukan perubahan pada sistem:<br />tambah/edit/hapus user, PII type, ubah hak akses, dll.</p>
+          <p className="text-gray-400 text-xs">Setiap aksi di sistem (login, tokenisasi, CRUD, dll.) akan otomatis tercatat di sini.</p>
         </div>
       ) : (
-        <div className="card overflow-hidden p-0">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr className="table-header">
-                {['Waktu', 'User', 'Modul', 'Aktivitas', 'Keterangan'].map(h => <th key={h}>{h}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(l => (
-                <tr key={l.id} className="table-row hover:bg-gray-50/50">
-                  <td className="whitespace-nowrap text-gray-400 text-xs">{fmtDate(l.created_at)}</td>
-                  <td className="font-medium text-gray-800">{l.user?.full_name || '—'}</td>
-                  <td><Badge text={MOD_LABELS[l.module_name] || l.module_name} variant={MOD_COLORS[l.module_name] || 'gray'} /></td>
-                  <td><ActivityBadge activity={l.activity} /></td>
-                  <td className="text-gray-500">{l.description}</td>
+        <>
+          <div className="card overflow-hidden p-0">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr className="table-header">
+                  {['Waktu', 'User', 'Modul', 'Aktivitas', 'Keterangan'].map(h => <th key={h}>{h}</th>)}
                 </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={5} className="text-center py-8 text-gray-300 text-sm">Tidak ada log yang sesuai filter.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {logs.map(l => (
+                  <tr key={l.id} className="table-row hover:bg-gray-50/50">
+                    <td className="whitespace-nowrap text-gray-400 text-xs">{fmtDate(l.created_at)}</td>
+                    <td className="font-medium text-gray-800">{l.user?.full_name || <span className="text-gray-400">System</span>}</td>
+                    <td><Badge text={MOD_LABELS[l.module_name] || l.module_name} variant={MOD_COLORS[l.module_name] || 'gray'} /></td>
+                    <td><ActivityBadge activity={l.activity} /></td>
+                    <td className="text-gray-500 max-w-xs truncate" title={l.description}>{l.description || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between mt-3 text-sm text-gray-500">
+            <span>Total: {pagination.total} log · Retensi {retentionDays} hari</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"><ChevronLeft size={16} /></button>
+              <span className="px-2">{page} / {pagination.pages || 1}</span>
+              <button onClick={() => setPage(p => Math.min(pagination.pages || 1, p + 1))} disabled={page >= (pagination.pages || 1)}
+                className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"><ChevronRight size={16} /></button>
+            </div>
+          </div>
+        </>
       )}
     </DashboardLayout>
   )
@@ -387,23 +476,144 @@ function AuditPage() {
 
 // ── Results Page ───────────────────────────────────────────────
 function ResultsPage() {
-  const { results, clear } = useResultsStore()
-  const hasPermission = useHasPermission()
-  const canClear = hasPermission('tokenization', 'execute')
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'Admin'
+
+  const [data, setData]           = useState([])
+  const [total, setTotal]         = useState(0)
+  const [page, setPage]           = useState(1)
+  const [loading, setLoading]     = useState(false)
+  const [deleting, setDeleting]   = useState(null)   // id being deleted, or 'all'
+  const [confirmClear, setConfirmClear] = useState(false)
+  const limit = 20
+
+  const fetchResults = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await tokenizationApi.results({ page, limit })
+      setData(res.data.data)
+      setTotal(res.data.pagination.total)
+    } catch { /* ignore */ }
+    finally { setLoading(false) }
+  }, [page])
+
+  useEffect(() => { fetchResults() }, [fetchResults])
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Hapus data tokenisasi ini?')) return
+    setDeleting(id)
+    try {
+      await tokenizationApi.deleteResult(id)
+      await fetchResults()
+    } catch { /* ignore */ }
+    finally { setDeleting(null) }
+  }
+
+  const handleClearAll = async () => {
+    setConfirmClear(false)
+    setDeleting('all')
+    try {
+      await tokenizationApi.clearResults()
+      setPage(1)
+      await fetchResults()
+    } catch { /* ignore */ }
+    finally { setDeleting(null) }
+  }
+
+  const totalPages = Math.ceil(total / limit)
   const cols = [
-    { key:'pii',      label:'Jenis Data', render: v => <span className="font-medium">{v}</span> },
-    { key:'original', label:'Nilai Asli',  render: v => <code className="font-mono text-xs text-gray-600">{v}</code> },
-    { key:'method',   label:'Metode',      render: v => <span className="text-gray-600">{v}</span> },
-    { key:'rule',     label:'Aturan',      render: v => <span className="text-gray-500">{v}</span> },
-    { key:'token',    label:'Hasil Token', render: v => <code className="text-xs font-mono text-primary bg-primary-light px-1.5 py-0.5 rounded">{v}</code> },
-    { key:'tweak',    label:'Tweak',       render: v => v ? <code className="text-xs font-mono text-gray-400">{v.substring(0,16)}…</code> : <span className="text-gray-300">—</span> },
-    { key:'savedAt',  label:'Waktu Simpan', render: v => <span className="text-gray-400 text-xs whitespace-nowrap">{fmtDate(v)}</span> },
+    { key: 'rule',               label: 'Aturan',          render: v => <span className="text-gray-600">{v?.rule_name || '—'}</span> },
+    { key: 'job',                label: 'Job',             render: v => <span className="text-gray-500 text-xs">{v?.job_name || '—'}</span> },
+    { key: 'tokenized_value',    label: 'Nilai Token',     render: v => <code className="text-xs font-mono text-primary bg-primary-light px-1.5 py-0.5 rounded">{v}</code> },
+    { key: 'status',             label: 'Status',          render: v => <StatusBadge status={v} /> },
+    { key: 'processing_time_ms', label: 'Waktu Proses',    render: v => <span className="text-gray-500 text-xs">{v} ms</span> },
+    { key: 'created_at',         label: 'Dibuat Pada',     render: v => <span className="text-gray-400 text-xs whitespace-nowrap">{fmtDate(v)}</span> },
+    ...(isAdmin ? [{
+      key: 'id', label: '',
+      render: (v) => (
+        <button onClick={() => handleDelete(v)} disabled={deleting === v}
+          className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40" title="Hapus">
+          {deleting === v
+            ? <span className="w-3.5 h-3.5 border border-red-400 border-t-transparent rounded-full animate-spin inline-block" />
+            : <Trash2 size={13} />}
+        </button>
+      )
+    }] : []),
   ]
+
   return (
-    <DashboardLayout title="Hasil Tokenisasi" actions={results.length > 0 && canClear && <Button label="Hapus Semua" onClick={clear} />}>
-      {results.length === 0
-        ? <div className="card text-center py-16 text-gray-300 text-sm">Belum ada hasil yang disimpan.<br />Gunakan tombol "Simpan Hasil" di halaman Demo.</div>
-        : <DataTable columns={cols} data={results} />}
+    <DashboardLayout
+      title="Hasil Tokenisasi"
+      actions={
+        <div className="flex items-center gap-2">
+          {isAdmin && data.length > 0 && (
+            <button onClick={() => setConfirmClear(true)} disabled={deleting === 'all'}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40">
+              {deleting === 'all'
+                ? <><span className="w-3.5 h-3.5 border border-red-400 border-t-transparent rounded-full animate-spin" /> Menghapus...</>
+                : <><Trash2 size={13} /> Hapus Semua</>}
+            </button>
+          )}
+          <button onClick={fetchResults} disabled={loading} className="flex items-center gap-1.5 btn-secondary px-3 py-1.5 text-xs">
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
+      }
+    >
+      {data.length === 0 && !loading ? (
+        <div className="card text-center py-16 text-gray-300 text-sm">
+          Belum ada hasil tokenisasi.<br />
+          Gunakan API atau halaman Demo untuk melakukan tokenisasi dan simpan hasilnya.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <DataTable columns={cols} data={data} loading={loading} />
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-xs text-gray-500">
+              <span>{total} total data</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1 || loading}
+                  className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40">
+                  <ChevronLeft size={14} />
+                </button>
+                <span className="px-2">Halaman {page} / {totalPages}</span>
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading}
+                  className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40">
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Konfirmasi Hapus Semua */}
+      {confirmClear && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                <Trash2 size={18} className="text-red-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-800 text-sm">Hapus Semua Data?</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Tindakan ini tidak dapat dibatalkan</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-600 mb-5">
+              Seluruh <strong>{total} data</strong> hasil tokenisasi akan dihapus secara permanen dari database.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmClear(false)}
+                className="btn-secondary px-4 py-2 text-sm">Batal</button>
+              <button onClick={handleClearAll}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors">
+                <Trash2 size={13} /> Hapus Semua
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   )
 }

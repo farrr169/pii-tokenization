@@ -6,6 +6,7 @@ import {
   ClipboardList, Settings, Users, LogOut, Shield,
   GitBranch, Unlock, BookOpen
 } from 'lucide-react'
+import api from '../../api/axios'
 
 const NAV_ITEMS = [
   { group: 'Utama', items: [
@@ -34,7 +35,9 @@ export function Sidebar() {
   const hasPermission = useHasPermission()
   const navigate = useNavigate()
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Flush logout event to backend BEFORE clearing the token
+    try { await api.post('/auth/logout') } catch (_) {}
     logout()
     usePermissionsStore.getState().save(INIT_PERMISSIONS)
     navigate('/login')

@@ -3,6 +3,7 @@ import { Plus, GitBranch, Pencil } from 'lucide-react'
 import { DashboardLayout } from '../../components/layout/DashboardLayout'
 import { Button, Modal, FormField, Badge, Toggle } from '../../components/ui'
 import { useHasPermission } from '../../store/permissions.store'
+import { useAuditStore } from '../../store/audit.store'
 
 const TYPE_COLORS = { STATIC: 'blue', DYNAMIC: 'green', RANDOMIZED: 'amber', USER_BASED: 'gray' }
 const TYPE_DESC = {
@@ -23,6 +24,7 @@ const EMPTY_FORM = { tweak_name: '', tweak_type: 'RANDOMIZED', tweak_value: '', 
 
 export default function TweaksPage() {
   const hasPermission = useHasPermission()
+  const { addLog } = useAuditStore()
   const canUpdate = hasPermission('pii_types', 'update')
   const canCreate = hasPermission('pii_types', 'create')
   const [tweaks, setTweaks]     = useState(INIT_TWEAKS)
@@ -60,15 +62,21 @@ export default function TweaksPage() {
     }
     if (editId) {
       setTweaks(prev => prev.map(t => t.id === editId ? { ...t, ...data } : t))
+      addLog({ module: 'tweaks', activity: 'update', description: `Tweak "${form.tweak_name}" diperbarui` })
     } else {
       setTweaks(prev => [...prev, { ...data, id: Date.now().toString(), is_active: true }])
+      addLog({ module: 'tweaks', activity: 'create', description: `Tweak "${form.tweak_name}" (${form.tweak_type}) ditambahkan` })
     }
     setShowModal(false)
   }
 
   const toggleActive = (id) => {
     if (!canUpdate) return
-    setTweaks(prev => prev.map(t => t.id === id ? { ...t, is_active: !t.is_active } : t))
+    setTweaks(prev => prev.map(t => {
+      if (t.id !== id) return t
+      addLog({ module: 'tweaks', activity: t.is_active ? 'deactivate' : 'activate', description: `Tweak "${t.tweak_name}" ${t.is_active ? 'dinonaktifkan' : 'diaktifkan'}` })
+      return { ...t, is_active: !t.is_active }
+    }))
   }
 
   return (
