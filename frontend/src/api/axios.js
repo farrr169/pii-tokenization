@@ -24,7 +24,8 @@ api.interceptors.response.use(
     const url = error.config?.url || ''
     const isLogoutFlow = url.includes('/auth/logout') || url.includes('/audit-logs/write')
 
-    if (error.response?.status === 401 && !isLogoutFlow) {
+    const hasToken = !!localStorage.getItem('token')
+    if (error.response?.status === 401 && !isLogoutFlow && hasToken) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       window.location.href = '/login'
