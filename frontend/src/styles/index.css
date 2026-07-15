@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f4f5f7;
+    color: #1a1a2e;
+    margin: 0;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-xl border border-gray-100 p-5;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-white font-medium px-4 py-2 rounded-lg text-sm hover:bg-primary-dark transition-colors flex items-center gap-2;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-gray-700 font-medium px-4 py-2 rounded-lg text-sm border border-gray-200 hover:bg-gray-50 transition-colors flex items-center gap-2;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all;
+  }
+
+  .select-field {
+    @apply w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary bg-white;
+  }
+
+  .badge {
+    @apply text-xs font-medium px-2.5 py-0.5 rounded-full;
+  }
+
+  .badge-blue  { @apply badge bg-primary-light text-primary-dark; }
+  .badge-green { @apply badge bg-success-light text-green-800; }
+  .badge-amber { @apply badge bg-warning-light text-yellow-900; }
+  .badge-red   { @apply badge bg-danger-light text-red-800; }
+  .badge-gray  { @apply badge bg-gray-100 text-gray-700; }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 cursor-pointer transition-all hover:bg-gray-50;
+  }
+
+  .nav-item.active {
+    @apply bg-primary-light text-primary font-medium;
+  }
+
+  .table-header th {
+    @apply px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-100;
+  }
+
+  .table-row td {
+    @apply px-4 py-3 text-sm border-b border-gray-50;
+  }
+
+  .stat-card {
+    @apply card flex flex-col gap-1;
+  }
+
+  .token-display {
+    @apply font-mono text-base tracking-widest px-4 py-3 rounded-lg;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
